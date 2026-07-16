@@ -1,66 +1,46 @@
-"""
-Central configuration for the RDH Helper Hands bot + website.
-Every value below is read from an environment variable so nothing
-sensitive ever needs to live in the code. Set these in Render's
-"Environment" tab for your service.
-"""
-
 import os
 
-# ---- Telegram -------------------------------------------------------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8398198634:AAHtUGoO4h1KAhzzdez0jAo823_5F0jQSl8")  # from @BotFather
-ADMIN_CHANNEL_ID = os.environ.get("ADMIN_CHANNEL_ID", "-1003870548002")  # where approvals happen
+# ---- Core secrets / connection info (set these as ENV VARS on Render) ----
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+MONGO_URL = os.environ.get("MONGO_URL", "")
 
-# Optional: comma separated telegram user ids allowed to press Approve/Decline,
-# and to use /stats and /broadcast. Leave empty to allow anyone who can post in
-# the admin channel to approve (but /stats and /broadcast then need OWNER_USER_ID).
-ADMIN_USER_IDS = [
-    x.strip() for x in os.environ.get("ADMIN_USER_IDS", "").split(",") if x.strip()
+# Channel where donation proofs + approve/decline buttons are posted
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1003870548002"))
+
+# Comma separated list of Telegram numeric user IDs allowed to use admin commands
+# and approve/decline buttons.
+ADMIN_IDS = [
+    int(x.strip()) for x in os.environ.get("ADMIN_IDS", "8192070400").split(",")
+    if x.strip()
 ]
-# Optional: your own numeric telegram user id (get it from @userinfobot), always
-# treated as an admin for /stats and /broadcast even if ADMIN_USER_IDS is empty.
-OWNER_USER_ID = os.environ.get("OWNER_USER_ID", "8192070400").strip()
 
-# ---- QR code ----------------------------------------------------------------
-# RECOMMENDED: commit a QR image to the repo (e.g. static/qr.jpg) and it will
-# always be used first — this is far more reliable than scraping Telegram.
-QR_LOCAL_PATH = os.environ.get("QR_LOCAL_PATH", "static/qr.jpg")
-# Fallback 1: public channel post that has the latest QR code posted in it.
-QR_CHANNEL_POST_URL = os.environ.get("QR_CHANNEL_POST_URL", "https://t.me/scisst/16")
-# Fallback 2: a telegram file_id for the QR image, used if both of the above fail.
-# Get a file_id by forwarding the QR photo to @userinfobot or @RawDataBot once.
-QR_FALLBACK_FILE_ID = os.environ.get("QR_FALLBACK_FILE_ID", "")
-QR_VALID_MINUTES = int(os.environ.get("QR_VALID_MINUTES", "5"))
+# QR code source. Either:
+#  - QR_FILE_ID: a Telegram file_id (grab this once by sending the QR image to
+#    your bot / any chat and reading the file_id from the response), OR
+#  - QR_IMAGE_URL: a direct https link to the image (e.g. a GitHub "raw" link).
+QR_FILE_ID = os.environ.get("QR_FILE_ID", "")
+QR_IMAGE_URL = os.environ.get("QR_IMAGE_URL", "")
 
-# ---- Mongo ------------------------------------------------------------------
-MONGO_URL = os.environ.get(
-    "MONGO_URL",
-    "mongodb+srv://wasdimu:xivasudev@cluster0.zjkb7od.mongodb.net/?appName=Cluster0",
-)
-DB_NAME = os.environ.get("DB_NAME", "rdh_helper_hands")
+# Used to build the webhook URL and to protect the webhook endpoint.
+BASE_URL = os.environ.get("BASE_URL", "")  # e.g. https://your-app.onrender.com
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-this-secret")
 
-# ---- Web server / webhook ---------------------------------------------------
-# Render sets RENDER_EXTERNAL_URL automatically for every web service, so you
-# usually don't need to set WEBHOOK_BASE_URL yourself.
-WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL", "")
-WEBHOOK_SECRET_PATH = os.environ.get("WEBHOOK_SECRET_PATH", BOT_TOKEN.split(":")[-1] if BOT_TOKEN else "hook")
-PORT = int(os.environ.get("PORT", "10000"))
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# ---- Misc ---------------------------------------------------------------
-OWNER_HANDLE = os.environ.get("OWNER_HANDLE", "@Youradhey")
-OWNER_SIGNATURE = os.environ.get("OWNER_SIGNATURE", "#RADHEY \u2022 #rdh")
-UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "uploads")
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "10"))
-
-# ---- Website admin panel (approve website donations from a browser) --------
-# Visit https://your-app/admin and log in with these (HTTP Basic Auth).
-# Change these in Render's Environment tab before going live!
-ADMIN_PANEL_USER = os.environ.get("ADMIN_PANEL_USER", "admin")
-ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "rdh-8192070400")
-
-# Preset donation categories: key -> (label, suggested amount in INR)
-CATEGORIES = {
-    "child": {"label": "Meal for a Child", "amount": 30, "emoji": "\U0001F9D2"},
-    "dog":   {"label": "Meal for a Dog",   "amount": 20, "emoji": "\U0001F415"},
-    "both":  {"label": "Meal for Both",    "amount": 50, "emoji": "\U0001F91D"},
+# ---- Donation rules ----
+DONATION_RATES = {
+    "child": {"label": "Children 👶", "min_amount": 30},
+    "dog": {"label": "Dogs 🐕", "min_amount": 20},
+    "both": {"label": "Both (Children + Dogs) 🤝", "min_amount": 50},
 }
+
+QR_TIMEOUT_SECONDS = 5 * 60  # 5 minutes
+
+# ---- Conversation states ----
+STATE_AWAITING_AMOUNT = "awaiting_amount"
+STATE_AWAITING_DESCRIPTION = "awaiting_description"
+STATE_AWAITING_NAME = "awaiting_name"
+STATE_AWAITING_INSTAGRAM = "awaiting_instagram"
+STATE_AWAITING_EMAIL = "awaiting_email"
+STATE_AWAITING_UTR = "awaiting_utr"
+STATE_AWAITING_SCREENSHOT = "awaiting_screenshot"

@@ -1,24 +1,24 @@
 services:
   - type: web
-    name: rdh-helper-hands
+    name: donation-telegram-bot
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 60
     envVars:
       - key: BOT_TOKEN
         sync: false
-      - key: ADMIN_CHANNEL_ID
-        value: "-1003870548002"
       - key: MONGO_URL
         sync: false
-      - key: QR_CHANNEL_POST_URL
-        value: "https://t.me/scisst/16"
-      - key: OWNER_HANDLE
-        value: "@Youradhey"
-      - key: OWNER_USER_ID
+      - key: CHANNEL_ID
+        value: "-1003870548002"
+      - key: ADMIN_IDS
+        value: "8192070400"
+      - key: QR_IMAGE_URL
         sync: false
-      - key: ADMIN_USER_IDS
+      - key: QR_FILE_ID
         sync: false
-      - key: QR_VALID_MINUTES
-        value: "5"
+      - key: BASE_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true

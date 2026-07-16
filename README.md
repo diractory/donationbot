@@ -1,62 +1,140 @@
-# RDH Helper Hands — bot + website
+# Donation Telegram Bot
 
-## Where do the donation details actually go?
-Every submission (Telegram or website) is posted by the bot into your admin
-channel: `ADMIN_CHANNEL_ID` (default `-1003870548002`). The bot **must be an
-admin of that channel** with "Post Messages" permission, otherwise the send
-silently fails. The photo is posted with a spoiler; the caption has category
-and amount visible, and name / Instagram / email / message / UTR hidden
-behind a `<tg-spoiler>` block that the admin taps to reveal. The Approve /
-Decline buttons are attached to that same post.
+A Flask + MongoDB Telegram bot for collecting one-time-meal donations for
+children and dogs, with QR-code payment, UTR + screenshot verification, an
+admin approval channel, and admin tools (stats, broadcast).
 
-## QR code — put a real file in the repo (recommended, most reliable)
-Replace `static/qr.jpg` with your actual payment QR image, **same filename**.
-That's it — the website's `/api/qr` and the bot's "Click to Pay" step both
-check this file *first*, before anything else. No scraping, no channel
-dependency, nothing to break. (There's a placeholder in that file right now
-saying "replace this file" — if you ever see that image, it means you forgot
-to swap it.)
+## How it works
 
-If you'd rather keep pulling from your public channel post, that still works
-as a fallback (`QR_CHANNEL_POST_URL`), and then a `QR_FALLBACK_FILE_ID` after
-that — but the local file is the one to trust.
+1. **`/start`** — Greets the user by name, explains the cause, shows a
+   **"❤️ Donate Now"** button.
+2. User taps Donate → chooses **Children (₹30) / Dogs (₹20) / Both (₹50)**.
+3. Bot asks for the **amount** (must be ≥ the minimum for that category — they
+   can donate more to cover multiple meals).
+4. Bot asks for a short **note/description** (optional — can type `skip`).
+5. Bot asks for the **name** to record the donation under.
+6. Bot asks for an **Instagram username** (optional — for a story mention).
+7. Bot asks for an **email** (for the donation proof).
+8. Bot sends the **QR code**, which auto-deletes after **5 minutes**. A
+   **"✅ I've Paid"** button then asks for the **UTR / transaction ID**.
+9. Bot asks for the **payment screenshot**.
+10. User gets: *"Your information has been submitted..."*
+11. The screenshot + all details (wrapped in a Telegram spoiler so only admins
+    reading the channel see them) are posted to your **admin channel**, with
+    **✅ Approve / ❌ Decline** buttons.
+12. When an admin taps Approve/Decline, the donor is notified automatically,
+    and the channel post is updated to show the final status.
 
-## One URL to check if anything is broken: `/diag`
-Visit `https://your-app.onrender.com/diag`. It returns JSON with:
-- `telegram_webhook` — Telegram's own view of your webhook (errors show here)
-- `mongo` — `"ok"` or the exact connection error
-- `qr_source` / `qr_reason` — which QR source is being used, or why none worked
-- `admin_channel_id`, `webhook_expected_url` — to sanity check your env vars
+Users can also use **`/history`** (or the "📜 My History" button) to see their
+past donations and statuses.
 
-Paste the output of `/diag` back if something's still wrong — it tells us
-exactly which piece is failing instead of guessing.
+### Admin commands (restricted to `ADMIN_IDS`)
+- `/stats` — total users, total/pending/approved/declined donations, total
+  approved amount.
+- `/broadcast <message>` — sends `<message>` to every user who has ever
+  messaged the bot.
+- Tapping **Approve/Decline** in the channel — only works for admins.
 
-## Deploy on Render
-1. Repo root must contain `app.py` directly (or set **Root Directory** in
-   Render's Settings to the subfolder if it's nested).
-2. **Start Command**:
-   `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120`
-3. **Environment** tab — set:
-   - `BOT_TOKEN` (from @BotFather)
-   - `MONGO_URL`
-   - `OWNER_USER_ID` (your numeric id from @userinfobot, for /stats /broadcast)
-   - `ADMIN_CHANNEL_ID` (default already correct if unset)
-4. MongoDB Atlas → Network Access → allow `0.0.0.0/0`.
-5. Add the bot as **admin** of your channel.
-6. Deploy, then check `/healthz`, then `/diag`, then `/` (website), then send
-   `/start` to the bot on Telegram.
+## Project structure
 
-## Admin commands (Telegram, DM the bot)
-- `/stats` — user count + donation counts (pending/approved/declined)
-- `/broadcast <text>` — sends text to every user who has started the bot
-- reply to any message with `/broadcast` — forwards that exact message to everyone
+```
+app.py           Flask app + webhook endpoint
+handlers.py       All conversation logic (the "brain")
+db.py             MongoDB access layer
+telegram_api.py   Thin wrapper around Telegram Bot API calls
+keyboards.py      Inline keyboard builders
+scheduler.py      Background timer to auto-delete the QR after 5 minutes
+config.py         Reads all settings from environment variables
+requirements.txt  Python dependencies
+Procfile          Render/Heroku-style start command
+render.yaml       Render "blueprint" for one-click setup (optional)
+.env.example      Every environment variable you need to set
+```
 
-Only `OWNER_USER_ID` (or ids in `ADMIN_USER_IDS`) can use these.
+## 1. Create your bot
 
-## Files
-- `app.py` — Flask app: webhook + website + JSON API + `/diag`
-- `bot_handlers.py` — all Telegram conversation logic
-- `qr_fetcher.py` — local file → channel scrape → fallback file_id, in that order
-- `db.py` — MongoDB access (never crashes boot if Atlas is unreachable)
-- `config.py` — env vars
-- `templates/`, `static/` — the website (put your real QR at `static/qr.jpg`)
+1. Open Telegram, message **@BotFather**, run `/newbot`, follow the prompts.
+2. Copy the token it gives you — this is `BOT_TOKEN`.
+3. Add your bot as an **admin** of your donation channel
+   (`-1003870548002`) so it can post messages there.
+
+## 2. Get your QR code onto the bot
+
+You mentioned uploading `qr.jpg` to GitHub or grabbing it from a channel post.
+Two supported options — set **one** of these env vars:
+
+- **`QR_IMAGE_URL`** (recommended, simplest): upload `qr.jpg` to a GitHub repo
+  and use the **raw** link, e.g.
+  `https://raw.githubusercontent.com/<you>/<repo>/main/qr.jpg`
+  (Telegram can fetch this directly — a `https://t.me/...` post link will
+  **not** work here, Telegram post links aren't direct image URLs.)
+
+- **`QR_FILE_ID`**: send `qr.jpg` to your bot once (in a private chat, after
+  it's deployed) and read the returned `file_id` from the Telegram API
+  response (you can check this via
+  `https://api.telegram.org/bot<token>/getUpdates`). Put that string in
+  `QR_FILE_ID` — Telegram will serve the same cached image instantly with no
+  external hosting needed.
+
+## 3. MongoDB
+
+Your Atlas connection string is already set up — just paste it into
+`MONGO_URL`:
+```
+mongodb+srv://wasdimu:xivasudev@cluster0.zjkb7od.mongodb.net/?appName=Cluster0
+```
+Nothing else to configure — collections (`users`, `donations`, `counters`)
+are created automatically on first use.
+
+**Security note:** this connection string contains a real username/password.
+Treat it as a secret — don't commit it to a public GitHub repo. Put it only
+in Render's environment variable settings (see below).
+
+## 4. Deploy to Render
+
+1. Push this folder to a GitHub repo.
+2. On Render: **New → Web Service** → connect your repo.
+   - Environment: **Python 3**
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `gunicorn app:app --workers 1 --threads 4 --timeout 60`
+   - (Or just let Render auto-detect via `render.yaml`.)
+3. Add these **Environment Variables** in Render's dashboard:
+
+   | Key | Value |
+   |---|---|
+   | `BOT_TOKEN` | token from BotFather |
+   | `MONGO_URL` | your Atlas connection string |
+   | `CHANNEL_ID` | `-1003870548002` |
+   | `ADMIN_IDS` | `8192070400` |
+   | `QR_IMAGE_URL` or `QR_FILE_ID` | see step 2 |
+   | `BASE_URL` | `https://<your-render-app-name>.onrender.com` (fill this in *after* the first deploy gives you the URL) |
+   | `WEBHOOK_SECRET` | any random string |
+
+4. Deploy. Once it's live, visit:
+   ```
+   https://<your-render-app-name>.onrender.com/set_webhook
+   ```
+   once, in your browser. This registers the webhook with Telegram and sets
+   the bot's command menu. You should see `{"ok": true, ...}`.
+
+5. Message your bot `/start` on Telegram — you're live! 🎉
+
+### Important: keep the service awake (free plan)
+Render's free web services spin down after inactivity, which means Telegram
+webhooks (and the 5-minute QR-deletion timer) may not fire instantly on the
+very first request after idling. If this matters to you, use Render's paid
+"always-on" plan, or a free uptime-pinger (e.g. UptimeRobot hitting `/` every
+few minutes).
+
+## Notes & things you may want to extend later
+
+- The QR auto-delete uses an in-process timer (`scheduler.py`). This is fine
+  for a single Render instance (we pin `--workers 1` in the `Procfile` for
+  this reason). If you ever scale to multiple instances, replace it with a
+  persisted job queue (APScheduler + DB job store, or Celery/RQ) so timers
+  survive restarts.
+- `/broadcast` sends messages one at a time with a small delay to respect
+  Telegram's rate limits. For very large user bases you may want a proper
+  task queue instead of a blocking loop.
+- Admin IDs are a comma-separated list (`ADMIN_IDS=8192070400,111111111`) if
+  you want more than one admin later.

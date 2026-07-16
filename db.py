@@ -1,127 +1,134 @@
-"""
-Thin MongoDB helper layer.
-
-Two collections:
-  sessions   -> temporary conversation state while a user is filling the
-               donation flow (both on Telegram and on the website)
-  donations  -> a permanent record once a user reaches the "submit" step,
-               including the admin's final decision
-"""
-
-import time
-import uuid
-import logging
-
+from datetime import datetime
 from pymongo import MongoClient
-from pymongo.errors import PyMongoError
-
 import config
 
-log = logging.getLogger("rdh-helper-hands.db")
+_client = MongoClient(config.MONGO_URL)
+_db = _client["donation_bot"]
 
-_client = MongoClient(config.MONGO_URL, serverSelectionTimeoutMS=5000)
-_db = _client[config.DB_NAME]
-
-sessions = _db["sessions"]
-donations = _db["donations"]
-users = _db["users"]
-
-# Helpful indexes (safe to call repeatedly, no-ops if they already exist).
-# Wrapped in try/except so a slow/unreachable Atlas cluster (e.g. IP not
-# whitelisted yet) never crashes the whole app on boot — it just logs and
-# the app keeps running; DB calls will simply fail until connectivity is fixed.
-try:
-    sessions.create_index("key", unique=True)
-    donations.create_index("donation_id", unique=True)
-    users.create_index("chat_id", unique=True)
-except PyMongoError:
-    log.exception("Could not create Mongo indexes on boot (will retry lazily on first use)")
+users_col = _db["users"]
+donations_col = _db["donations"]
+counters_col = _db["counters"]
 
 
-# ---------------------------------------------------------------------------
-# Session helpers (conversation state machine)
-# ---------------------------------------------------------------------------
+# ---------------- Users ----------------
 
-def get_session(key: str) -> dict:
-    """key is usually the telegram chat_id (as string) or a random web session id."""
-    doc = sessions.find_one({"key": key})
-    return doc["data"] if doc else {}
+def get_user(user_id):
+    return users_col.find_one({"_id": user_id})
 
 
-def set_session(key: str, data: dict) -> None:
-    sessions.update_one(
-        {"key": key},
-        {"$set": {"key": key, "data": data, "updated_at": time.time()}},
-        upsert=True,
-    )
-
-
-def update_session(key: str, **fields) -> dict:
-    data = get_session(key)
-    data.update(fields)
-    set_session(key, data)
-    return data
-
-
-def clear_session(key: str) -> None:
-    sessions.delete_one({"key": key})
-
-
-# ---------------------------------------------------------------------------
-# Donation records
-# ---------------------------------------------------------------------------
-
-def new_donation_id() -> str:
-    return uuid.uuid4().hex[:10].upper()
-
-
-def create_donation(payload: dict) -> str:
-    donation_id = new_donation_id()
-    record = {
-        "donation_id": donation_id,
-        "status": "pending",          # pending -> approved | declined
-        "created_at": time.time(),
-        **payload,
-    }
-    donations.insert_one(record)
-    return donation_id
-
-
-def get_donation(donation_id: str) -> dict:
-    return donations.find_one({"donation_id": donation_id}, {"_id": 0})
-
-
-def set_donation_status(donation_id: str, status: str, decided_by: str = "") -> None:
-    donations.update_one(
-        {"donation_id": donation_id},
-        {"$set": {"status": status, "decided_at": time.time(), "decided_by": decided_by}},
-    )
-
-
-def list_donations(status: str = None, limit: int = 200):
-    query = {"status": status} if status else {}
-    cur = donations.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
-    return list(cur)
-
-
-# ---------------------------------------------------------------------------
-# Users (for /stats and /broadcast)
-# ---------------------------------------------------------------------------
-
-def upsert_user(chat_id, username: str = "", first_name: str = "") -> None:
-    users.update_one(
-        {"chat_id": chat_id},
+def upsert_user(user_id, first_name, username):
+    users_col.update_one(
+        {"_id": user_id},
         {
-            "$set": {"username": username or "", "first_name": first_name or "", "last_seen": time.time()},
-            "$setOnInsert": {"chat_id": chat_id, "first_seen": time.time()},
+            "$setOnInsert": {
+                "first_name": first_name,
+                "username": username,
+                "created_at": datetime.utcnow(),
+                "blocked": False,
+                "state": None,
+                "temp": {},
+            },
+            "$set": {
+                "last_seen": datetime.utcnow(),
+                "first_name": first_name,
+                "username": username,
+            },
         },
         upsert=True,
     )
 
 
-def count_users() -> int:
-    return users.count_documents({})
+def set_state(user_id, state, temp=None):
+    update = {"state": state}
+    if temp is not None:
+        update["temp"] = temp
+    users_col.update_one({"_id": user_id}, {"$set": update}, upsert=True)
 
 
-def all_user_chat_ids():
-    return [u["chat_id"] for u in users.find({}, {"chat_id": 1})]
+def update_temp(user_id, key, value):
+    users_col.update_one({"_id": user_id}, {"$set": {f"temp.{key}": value}}, upsert=True)
+
+
+def clear_state(user_id):
+    users_col.update_one({"_id": user_id}, {"$set": {"state": None, "temp": {}}}, upsert=True)
+
+
+def count_users():
+    return users_col.count_documents({})
+
+
+def all_user_ids():
+    return [u["_id"] for u in users_col.find({}, {"_id": 1})]
+
+
+# ---------------- Donations ----------------
+
+def get_next_donation_id():
+    result = counters_col.find_one_and_update(
+        {"_id": "donation_id"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=True,
+    )
+    return result["seq"] if result else 1
+
+
+def create_donation(donation_id, user_id, data):
+    doc = {
+        "_id": donation_id,
+        "user_id": user_id,
+        "category": data.get("category"),
+        "amount": data.get("amount"),
+        "description": data.get("description"),
+        "name": data.get("name"),
+        "instagram": data.get("instagram"),
+        "email": data.get("email"),
+        "utr": data.get("utr"),
+        "screenshot_file_id": data.get("screenshot_file_id"),
+        "status": "pending",
+        "created_at": datetime.utcnow(),
+        "channel_message_id": None,
+    }
+    donations_col.insert_one(doc)
+    return doc
+
+
+def set_channel_message_id(donation_id, message_id):
+    donations_col.update_one({"_id": donation_id}, {"$set": {"channel_message_id": message_id}})
+
+
+def get_donation(donation_id):
+    return donations_col.find_one({"_id": donation_id})
+
+
+def update_donation_status(donation_id, status):
+    donations_col.update_one(
+        {"_id": donation_id},
+        {"$set": {"status": status, "resolved_at": datetime.utcnow()}},
+    )
+
+
+def get_user_donations(user_id, limit=10):
+    return list(
+        donations_col.find({"user_id": user_id}).sort("created_at", -1).limit(limit)
+    )
+
+
+def donation_stats():
+    total = donations_col.count_documents({})
+    pending = donations_col.count_documents({"status": "pending"})
+    approved = donations_col.count_documents({"status": "approved"})
+    declined = donations_col.count_documents({"status": "declined"})
+    approved_sum = 0
+    for d in donations_col.find({"status": "approved"}, {"amount": 1}):
+        try:
+            approved_sum += float(d.get("amount") or 0)
+        except (TypeError, ValueError):
+            pass
+    return {
+        "total": total,
+        "pending": pending,
+        "approved": approved,
+        "declined": declined,
+        "approved_sum": approved_sum,
+    }
