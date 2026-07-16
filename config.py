@@ -26,7 +26,7 @@ OWNER_USER_ID = os.environ.get("OWNER_USER_ID", "8192070400").strip()
 # always be used first — this is far more reliable than scraping Telegram.
 QR_LOCAL_PATH = os.environ.get("QR_LOCAL_PATH", "static/qr.jpg")
 # Fallback 1: public channel post that has the latest QR code posted in it.
-QR_CHANNEL_POST_URL = os.environ.get("QR_CHANNEL_POST_URL", "https://t.me/scisst/20")
+QR_CHANNEL_POST_URL = os.environ.get("QR_CHANNEL_POST_URL", "https://t.me/scisst/16")
 # Fallback 2: a telegram file_id for the QR image, used if both of the above fail.
 # Get a file_id by forwarding the QR photo to @userinfobot or @RawDataBot once.
 QR_FALLBACK_FILE_ID = os.environ.get("QR_FALLBACK_FILE_ID", "")
@@ -51,6 +51,12 @@ OWNER_HANDLE = os.environ.get("OWNER_HANDLE", "@Youradhey")
 OWNER_SIGNATURE = os.environ.get("OWNER_SIGNATURE", "#RADHEY \u2022 #rdh")
 UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "uploads")
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "10"))
+
+# ---- Website admin panel (approve website donations from a browser) --------
+# Visit https://your-app/admin and log in with these (HTTP Basic Auth).
+# Change these in Render's Environment tab before going live!
+ADMIN_PANEL_USER = os.environ.get("ADMIN_PANEL_USER", "admin")
+ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "rdh-8192070400")
 
 # Preset donation categories: key -> (label, suggested amount in INR)
 CATEGORIES = {

@@ -2,9 +2,10 @@ import io
 import logging
 import threading
 import time
+from functools import wraps
 
 import requests
-from flask import Flask, request, render_template, jsonify, send_file, abort
+from flask import Flask, request, render_template, jsonify, send_file, abort, Response
 
 import config
 import db
@@ -18,6 +19,18 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
 
 TELEGRAM_API = f"https://api.telegram.org/bot{config.BOT_TOKEN}"
+
+
+def _requires_admin_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != config.ADMIN_PANEL_USER or auth.password != config.ADMIN_PANEL_PASSWORD:
+            return Response(
+                "Login required.", 401, {"WWW-Authenticate": 'Basic realm="RDH Admin"'}
+            )
+        return f(*args, **kwargs)
+    return wrapper
 
 
 @app.route("/healthz")
@@ -67,6 +80,103 @@ def _ensure_webhook_delayed():
 
 
 threading.Thread(target=_ensure_webhook_delayed, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Admin panel — approve/decline from a browser (mainly for website donations)
+# ---------------------------------------------------------------------------
+
+@app.route("/admin")
+@_requires_admin_auth
+def admin_panel():
+    return render_template("admin.html")
+
+
+@app.route("/admin/api/list")
+@_requires_admin_auth
+def admin_list():
+    status = request.args.get("status") or None
+    return jsonify({"ok": True, "donations": db.list_donations(status=status)})
+
+
+@app.route("/admin/api/screenshot/<donation_id>")
+@_requires_admin_auth
+def admin_screenshot(donation_id):
+    d = db.get_donation(donation_id.upper())
+    if not d or not d.get("screenshot_file_id"):
+        abort(404)
+    try:
+        r = requests.get(f"{TELEGRAM_API}/getFile", params={"file_id": d["screenshot_file_id"]}, timeout=10)
+        file_path = r.json()["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{file_path}"
+        img = requests.get(file_url, timeout=10)
+        return send_file(io.BytesIO(img.content), mimetype="image/jpeg")
+    except Exception:
+        log.exception("Failed to fetch screenshot for %s", donation_id)
+        abort(502)
+
+
+@app.route("/admin/api/decide", methods=["POST"])
+@_requires_admin_auth
+def admin_decide():
+    data = request.get_json(force=True, silent=True) or {}
+    donation_id = (data.get("donation_id") or "").upper()
+    action = data.get("action")
+
+    if action not in ("approve", "decline"):
+        return jsonify({"ok": False, "error": "action must be 'approve' or 'decline'"}), 400
+
+    d = db.get_donation(donation_id)
+    if not d:
+        return jsonify({"ok": False, "error": "Donation not found"}), 404
+
+    status = "approved" if action == "approve" else "declined"
+    db.set_donation_status(donation_id, status, decided_by=f"web:{config.ADMIN_PANEL_USER}")
+
+    # Update the channel post too, so it doesn't sit there looking unhandled
+    if d.get("channel_message_id"):
+        decision_word = "\u2705 APPROVED" if action == "approve" else "\u274C DECLINED"
+        try:
+            requests.post(
+                f"{TELEGRAM_API}/editMessageReplyMarkup",
+                data={
+                    "chat_id": config.ADMIN_CHANNEL_ID,
+                    "message_id": d["channel_message_id"],
+                    "reply_markup": "{}",
+                },
+                timeout=10,
+            )
+            requests.post(
+                f"{TELEGRAM_API}/editMessageCaption",
+                data={
+                    "chat_id": config.ADMIN_CHANNEL_ID,
+                    "message_id": d["channel_message_id"],
+                    "parse_mode": "HTML",
+                    "caption": f"{d.get('category_label')} \u2014 #{donation_id}\n\n{decision_word} (via website admin panel)",
+                },
+                timeout=10,
+            )
+        except Exception:
+            log.exception("Failed to update channel post for %s", donation_id)
+
+    # If this donor came from Telegram, message them directly too
+    if d.get("source") == "telegram" and d.get("chat_id"):
+        if action == "approve":
+            text = (
+                "Hey, your payment is approved now! \u2705 You'll need to wait about a week (min) as we have "
+                "more orders to fulfil before yours \u2014 thank you for your patience and your kindness. \U0001F49B"
+            )
+        else:
+            text = (
+                "Hey, unfortunately we couldn't verify your payment and it's been declined. \u274C "
+                f"If you think this is a mistake, please reach out to {config.OWNER_HANDLE}."
+            )
+        try:
+            requests.post(f"{TELEGRAM_API}/sendMessage", data={"chat_id": d["chat_id"], "text": text}, timeout=10)
+        except Exception:
+            log.exception("Failed to notify telegram donor for %s", donation_id)
+
+    return jsonify({"ok": True, "donation_id": donation_id, "status": status})
 
 
 # ---------------------------------------------------------------------------
@@ -191,14 +301,16 @@ def api_submit():
         f"<tg-spoiler>{spoiler}</tg-spoiler>"
     )
 
+    tg_message_id = None
+    screenshot_file_id = None
     try:
-        requests.post(
+        r = requests.post(
             f"{TELEGRAM_API}/sendPhoto",
             data={
                 "chat_id": config.ADMIN_CHANNEL_ID,
                 "caption": caption,
                 "parse_mode": "HTML",
-                "has_spoiler": True,
+                "has_spoiler": "true",
                 "reply_markup": (
                     '{"inline_keyboard": [[{"text": "\u2705 Approve", "callback_data": "appr_%s"}, '
                     '{"text": "\u274C Decline", "callback_data": "decl_%s"}]]}'
@@ -208,8 +320,19 @@ def api_submit():
             files={"photo": (screenshot.filename, screenshot.stream, screenshot.mimetype)},
             timeout=20,
         )
+        result = r.json().get("result", {})
+        tg_message_id = result.get("message_id")
+        photos = result.get("photo") or []
+        if photos:
+            screenshot_file_id = photos[-1]["file_id"]
     except Exception:
         log.exception("Failed to forward web submission to admin channel")
+
+    if tg_message_id or screenshot_file_id:
+        db.donations.update_one(
+            {"donation_id": donation_id},
+            {"$set": {"channel_message_id": tg_message_id, "screenshot_file_id": screenshot_file_id}},
+        )
 
     return jsonify({"ok": True, "donation_id": donation_id})
 

@@ -98,6 +98,12 @@ def set_donation_status(donation_id: str, status: str, decided_by: str = "") -> 
     )
 
 
+def list_donations(status: str = None, limit: int = 200):
+    query = {"status": status} if status else {}
+    cur = donations.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
+    return list(cur)
+
+
 # ---------------------------------------------------------------------------
 # Users (for /stats and /broadcast)
 # ---------------------------------------------------------------------------

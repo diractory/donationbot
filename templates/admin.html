@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDH Admin</title>
+<style>
+  :root{ --ink:#1B2E28; --paper:#F2E9D8; --marigold:#E8A33D; --brick:#B5482E; --moss:#4C7A5D; --soft:#5B6B63; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ink);color:var(--paper);font-family:system-ui,sans-serif;padding:24px}
+  h1{font-size:22px;margin:0 0 16px}
+  .tabs{display:flex;gap:8px;margin-bottom:18px}
+  .tabs button{background:transparent;border:1px solid rgba(242,233,216,.3);color:var(--paper);padding:7px 14px;border-radius:999px;cursor:pointer;font-size:13px}
+  .tabs button.active{background:var(--marigold);color:var(--ink);border-color:var(--marigold);font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+  .card{background:var(--paper);color:var(--ink);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
+  .card img{width:100%;border-radius:8px;max-height:220px;object-fit:cover;background:#ddd}
+  .row{display:flex;justify-content:space-between;font-size:13px}
+  .row b{color:var(--brick)}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:700;text-transform:uppercase}
+  .badge.pending{background:#f0d48a;color:#5a4300}
+  .badge.approved{background:#bfe3c8;color:#1e5c33}
+  .badge.declined{background:#f0b3a8;color:#7a1f10}
+  .actions{display:flex;gap:8px;margin-top:6px}
+  .actions button{flex:1;border:none;border-radius:8px;padding:9px;font-weight:700;cursor:pointer}
+  .approve-btn{background:var(--moss);color:#fff}
+  .decline-btn{background:var(--brick);color:#fff}
+  .empty{color:#a9b6b0;font-size:14px}
+  .id{font-family:monospace;color:var(--soft)}
+</style>
+</head>
+<body>
+  <h1>📋 RDH Donations</h1>
+  <div class="tabs">
+    <button data-status="" class="active">All</button>
+    <button data-status="pending">Pending</button>
+    <button data-status="approved">Approved</button>
+    <button data-status="declined">Declined</button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" hidden>Nothing here yet.</p>
+
+<script>
+let currentStatus = "";
+
+async function load() {
+  const res = await fetch(`/admin/api/list${currentStatus ? '?status=' + currentStatus : ''}`);
+  const data = await res.json();
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  grid.innerHTML = '';
+  if (!data.donations.length) { empty.hidden = false; return; }
+  empty.hidden = true;
+
+  for (const d of data.donations) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="row"><span class="id">#${d.donation_id}</span>
+        <span class="badge ${d.status}">${d.status}</span></div>
+      ${d.screenshot_file_id ? `<img src="/admin/api/screenshot/${d.donation_id}" loading="lazy">` : ''}
+      <div class="row"><span>Source</span><b>${d.source}</b></div>
+      <div class="row"><span>Category</span><b>${d.category_label}</b></div>
+      <div class="row"><span>Amount</span><b>\u20B9${d.amount}</b></div>
+      <div class="row"><span>Name</span><b>${d.name || '-'}</b></div>
+      <div class="row"><span>Instagram</span><b>${d.instagram || '-'}</b></div>
+      <div class="row"><span>Email</span><b>${d.email || '-'}</b></div>
+      <div class="row"><span>Message</span><b>${d.message || '-'}</b></div>
+      <div class="row"><span>UTR</span><b>${d.utr || '-'}</b></div>
+      ${d.status === 'pending' ? `
+      <div class="actions">
+        <button class="approve-btn" onclick="decide('${d.donation_id}','approve')">Approve</button>
+        <button class="decline-btn" onclick="decide('${d.donation_id}','decline')">Decline</button>
+      </div>` : ''}
+    `;
+    grid.appendChild(card);
+  }
+}
+
+async function decide(id, action) {
+  await fetch('/admin/api/decide', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ donation_id: id, action })
+  });
+  load();
+}
+
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentStatus = btn.dataset.status;
+    load();
+  });
+});
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
