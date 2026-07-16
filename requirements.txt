@@ -1,0 +1,5 @@
+Flask>=3.0,<4.0
+gunicorn>=22.0,<23.0
+pyTelegramBotAPI>=4.20,<5.0
+pymongo[srv]>=4.7,<5.0
+requests>=2.31,<3.0

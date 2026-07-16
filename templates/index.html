@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDH Helper Hands — One meal at a time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;700&family=Work+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="hero-copy">
+      <span class="eyebrow">#rdh &middot; helper hands</span>
+      <h1>One meal.<br>One rupee<br>at a time.</h1>
+      <p>A small donation feeds a hungry child or a stray dog a full meal.
+         Pick a meal, pay in under a minute, get the proof once it's delivered.</p>
+      <div class="hero-stub">
+        <span class="stub-label">today's rate</span>
+        <div class="stub-rows">
+          <span>Child meal <b>₹{{ categories['child']['amount'] }}</b></span>
+          <span>Dog meal <b>₹{{ categories['dog']['amount'] }}</b></span>
+          <span>Both <b>₹{{ categories['both']['amount'] }}</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TICKET / WIZARD -->
+    <div class="ticket" id="ticket">
+      <div class="ticket-holes" aria-hidden="true"></div>
+
+      <div class="ticket-body">
+        <div class="ticket-head">
+          <span class="ticket-no" id="ticket-no">TICKET · DRAFT</span>
+          <span class="ticket-steps" id="ticket-steps">step 1 / 6</span>
+        </div>
+
+        <!-- STEP 1: category -->
+        <section class="step active" data-step="1">
+          <h2>Choose what to feed</h2>
+          <div class="cat-grid">
+            {% for code, info in categories.items() %}
+            <button type="button" class="cat-card" data-code="{{ code }}" data-amount="{{ info['amount'] }}" data-label="{{ info['label'] }}">
+              <span class="cat-emoji">{{ info['emoji'] }}</span>
+              <span class="cat-label">{{ info['label'] }}</span>
+              <span class="cat-amount">₹{{ info['amount'] }}</span>
+            </button>
+            {% endfor %}
+          </div>
+        </section>
+
+        <!-- STEP 2: amount -->
+        <section class="step" data-step="2">
+          <h2>How much would you like to give?</h2>
+          <p class="hint">Any amount is welcome — if it's different from the suggested amount, tell us why in one line.</p>
+          <label class="field">
+            <span>Amount (₹)</span>
+            <input type="number" id="f-amount" min="1" step="1">
+          </label>
+          <label class="field" id="f-explain-wrap" hidden>
+            <span>Why this amount?</span>
+            <input type="text" id="f-explain" placeholder="e.g. splitting between 2 meals">
+          </label>
+        </section>
+
+        <!-- STEP 3: details -->
+        <section class="step" data-step="3">
+          <h2>Who's this from?</h2>
+          <label class="field"><span>Name to print on the record</span>
+            <input type="text" id="f-name" placeholder="Your full name"></label>
+          <label class="field"><span>Instagram username (optional, for a shoutout)</span>
+            <input type="text" id="f-insta" placeholder="@yourhandle"></label>
+          <label class="field"><span>Email (to receive proof photos)</span>
+            <input type="email" id="f-email" placeholder="you@example.com"></label>
+        </section>
+
+        <!-- STEP 4: message -->
+        <section class="step" data-step="4">
+          <h2>Anything you'd like to add?</h2>
+          <p class="hint">A dedication, a note, or just leave it blank.</p>
+          <label class="field"><span>Message (optional)</span>
+            <textarea id="f-message" rows="3" placeholder="Optional message"></textarea></label>
+        </section>
+
+        <!-- STEP 5: pay -->
+        <section class="step" data-step="5">
+          <h2>Scan &amp; pay</h2>
+          <p class="hint">This QR is valid for {{ qr_minutes }} minutes. Pay, then come back and tap next.</p>
+          <div class="qr-frame">
+            <img id="qr-img" alt="Payment QR code">
+            <span class="qr-timer" id="qr-timer">{{ qr_minutes }}:00</span>
+          </div>
+        </section>
+
+        <!-- STEP 6: proof -->
+        <section class="step" data-step="6">
+          <h2>Send your proof</h2>
+          <label class="field"><span>Payment screenshot</span>
+            <input type="file" id="f-screenshot" accept="image/*"></label>
+          <label class="field"><span>UTR / transaction ID</span>
+            <input type="text" id="f-utr" placeholder="Enter UTR ID"></label>
+        </section>
+
+        <!-- SUCCESS -->
+        <section class="step" data-step="done">
+          <h2 id="done-title">Sent to admin ✅</h2>
+          <p class="hint">Hold on — the admin will cross-check this and approve it shortly.</p>
+          <div class="ref-box">
+            <span>Your reference</span>
+            <b id="ref-id">—</b>
+          </div>
+          <button type="button" class="ghost-btn" id="check-status-btn">Check status</button>
+          <p class="status-line" id="status-line"></p>
+        </section>
+
+        <div class="ticket-nav">
+          <button type="button" class="ghost-btn" id="back-btn">Back</button>
+          <button type="button" class="main-btn" id="next-btn">Next</button>
+        </div>
+        <p class="error-line" id="error-line"></p>
+      </div>
+    </div>
+  </header>
+
+  <footer class="foot">
+    <span>Run with care by <b>@Youradhey</b> &nbsp;·&nbsp; #RADHEY &middot; #rdh</span>
+    <span class="foot-note">Be kind.</span>
+  </footer>
+</div>
+
+<script>window.QR_MINUTES = {{ qr_minutes }};</script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
